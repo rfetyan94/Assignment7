@@ -20,17 +20,35 @@ contract Source is AccessControl {
         _grantRole(WARDEN_ROLE, admin);
 
     }
-
 	function deposit(address _token, address _recipient, uint256 _amount ) public {
-		//YOUR CODE HERE
+		// Check if token is approved for deposit
+        require(approved[_token], "Token not registered");
+
+        // Pull tokens from sender into this contract
+        ERC20(_token).transferFrom(msg.sender, address(this), _amount);
+
+        // Emit Deposit event so bridge operator knows
+        emit Deposit(_token, _recipient, _amount);
 	}
 
-	function withdraw(address _token, address _recipient, uint256 _amount ) onlyRole(WARDEN_ROLE) public {
-		//YOUR CODE HERE
+	function withdraw(address _token, address _recipient, uint256 _amount ) public onlyRole(WARDEN_ROLE) {
+		// Send tokens from bridge contract to recipient
+        ERC20(_token).transfer(_recipient, _amount);
+
+        // Emit withdrawal event so we have record
+        emit Withdrawal(_token, _recipient, _amount);
 	}
 
-	function registerToken(address _token) onlyRole(ADMIN_ROLE) public {
-		//YOUR CODE HERE
+	function registerToken(address _token) public onlyRole(ADMIN_ROLE) {
+		// Only register if it hasn't been registered already
+        require(!approved[_token], "Token already registered");
+
+        // Add to approved mapping and array
+        approved[_token] = true;
+        tokens.push(_token);
+
+        // Emit registration event
+        emit Registration(_token);
 	}
 
 
