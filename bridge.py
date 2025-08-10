@@ -49,7 +49,7 @@ def scan_blocks(chain, contract_info="contract_info.json"):
         print( f"Invalid chain: {chain}" )
         return 0
     
-        #YOUR CODE HERE
+    #YOUR CODE HERE
     w3_source = connect_to('source')
     w3_destination = connect_to('destination')
 
@@ -71,27 +71,30 @@ def scan_blocks(chain, contract_info="contract_info.json"):
                    or destination_info.get('signer_key'))
 
     # validate signer info
-    if not wallet_address or not isinstance(wallet_address, str):
-        print("ERROR: 'signer' missing or invalid in contract_info.json (top-level or per-chain).")
+    if not isinstance(wallet_address, str) or not wallet_address:
+        print("ERROR: 'signer' missing or invalid in contract_info.json")
         return 0
-    if not private_key or not isinstance(private_key, str):
-        print("ERROR: 'signer_key' missing or invalid in contract_info.json (top-level or per-chain).")
+    if not isinstance(private_key, str) or not private_key:
+        print("ERROR: 'signer_key' missing or invalid in contract_info.json")
         return 0
 
     wallet_address = wallet_address.strip()
     private_key = private_key.strip()
 
     # choose which events to read and which chain to send txs on
+    # widen the scan window to be resilient to quick block production
+    WINDOW = 25
+
     if chain == 'source':
         # listen on source for Deposit; send tx on destination -> wrap()
-        from_block = max(0, w3_source.eth.block_number - 5)
+        from_block = max(0, w3_source.eth.block_number - WINDOW)
         event_filter = source_contract.events.Deposit.create_filter(from_block=from_block)
         tx_w3 = w3_destination
         tx_contract = destination_contract
         action = 'wrap'
     else:
         # listen on destination for Unwrap; send tx on source -> withdraw()
-        from_block = max(0, w3_destination.eth.block_number - 5)
+        from_block = max(0, w3_destination.eth.block_number - WINDOW)
         event_filter = destination_contract.events.Unwrap.create_filter(from_block=from_block)
         tx_w3 = w3_source
         tx_contract = source_contract
@@ -100,9 +103,10 @@ def scan_blocks(chain, contract_info="contract_info.json"):
     # fetch events once to avoid rate limits
     events = event_filter.get_all_entries()
 
+    # start with the pending nonce once and increment locally per tx
+    next_nonce = tx_w3.eth.get_transaction_count(wallet_address, 'pending')
+
     for event in events:
-        # always use pending nonce so we can batch safely
-        nonce = tx_w3.eth.get_transaction_count(wallet_address, 'pending')
         gas_price = int(tx_w3.eth.gas_price * 1.2)
 
         if chain == 'source' and action == 'wrap':
@@ -115,11 +119,11 @@ def scan_blocks(chain, contract_info="contract_info.json"):
                 'from': wallet_address,
                 'chainId': tx_w3.eth.chain_id,
                 'gas': 700000,
-                'nonce': nonce,
+                'nonce': next_nonce,
                 'gasPrice': gas_price
             })
         elif chain == 'destination' and action == 'withdraw':
-            # Unwrap(underlying, wrapped, frm, to, amount) -> Source.withdraw(underlying, to, amount)
+            # Unwrap(underlying_token, wrapped_token, frm, to, amount) -> Source.withdraw(underlying_token, to, amount)
             txn = tx_contract.functions.withdraw(
                 event['args']['underlying_token'],
                 event['args']['to'],
@@ -128,7 +132,7 @@ def scan_blocks(chain, contract_info="contract_info.json"):
                 'from': wallet_address,
                 'chainId': tx_w3.eth.chain_id,
                 'gas': 700000,
-                'nonce': nonce,
+                'nonce': next_nonce,
                 'gasPrice': gas_price
             })
         else:
@@ -136,3 +140,4 @@ def scan_blocks(chain, contract_info="contract_info.json"):
 
         signed = tx_w3.eth.account.sign_transaction(txn, private_key=private_key)
         tx_w3.eth.send_raw_transaction(signed.raw_transaction)
+        next_nonce += 1
