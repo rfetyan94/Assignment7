@@ -135,4 +135,4 @@ def scan_blocks(chain, contract_info="contract_info.json"):
             continue
 
         signed = tx_w3.eth.account.sign_transaction(txn, private_key=private_key)
-        tx_w3.eth.send_raw_transaction(signed.rawTransaction)
+        tx_w3.eth.send_raw_transaction(signed.raw_transaction)
