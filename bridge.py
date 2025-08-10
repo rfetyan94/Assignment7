@@ -59,7 +59,6 @@ def scan_blocks(chain, contract_info="contract_info.json"):
     source_contract = w3_source.eth.contract(address=source_info['address'], abi=source_info['abi'])
     destination_contract = w3_destination.eth.contract(address=destination_info['address'], abi=destination_info['abi'])
 
-    # pull signer creds (prefer top-level; fallback to per-chain if needed)
     with open(contract_info, 'r') as f:
         ci_all = json.load(f)
 
@@ -81,36 +80,30 @@ def scan_blocks(chain, contract_info="contract_info.json"):
     wallet_address = wallet_address.strip()
     private_key = private_key.strip()
 
-    # choose which events to read and which chain to send txs on
-    # widen the scan window to be resilient to quick block production
+
     WINDOW = 25
 
     if chain == 'source':
-        # listen on source for Deposit; send tx on destination -> wrap()
         from_block = max(0, w3_source.eth.block_number - WINDOW)
         event_filter = source_contract.events.Deposit.create_filter(from_block=from_block)
         tx_w3 = w3_destination
         tx_contract = destination_contract
         action = 'wrap'
     else:
-        # listen on destination for Unwrap; send tx on source -> withdraw()
         from_block = max(0, w3_destination.eth.block_number - WINDOW)
         event_filter = destination_contract.events.Unwrap.create_filter(from_block=from_block)
         tx_w3 = w3_source
         tx_contract = source_contract
         action = 'withdraw'
 
-    # fetch events once to avoid rate limits
     events = event_filter.get_all_entries()
 
-    # start with the pending nonce once and increment locally per tx
     next_nonce = tx_w3.eth.get_transaction_count(wallet_address, 'pending')
 
     for event in events:
         gas_price = int(tx_w3.eth.gas_price * 1.2)
 
         if chain == 'source' and action == 'wrap':
-            # Deposit(token, recipient, amount) -> Destination.wrap(token, recipient, amount)
             txn = tx_contract.functions.wrap(
                 event['args']['token'],
                 event['args']['recipient'],
@@ -123,7 +116,6 @@ def scan_blocks(chain, contract_info="contract_info.json"):
                 'gasPrice': gas_price
             })
         elif chain == 'destination' and action == 'withdraw':
-            # Unwrap(underlying_token, wrapped_token, frm, to, amount) -> Source.withdraw(underlying_token, to, amount)
             txn = tx_contract.functions.withdraw(
                 event['args']['underlying_token'],
                 event['args']['to'],
